@@ -1,8 +1,11 @@
 package dan2097.org.bitbucket.uspto;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Enumeration;
@@ -74,13 +77,13 @@ public class ExtractOrganicChemistryPatents {
 		}
 	}
 	private void processPatentArchiveFile(File patentArchiveFile) throws IOException {
-		LOG.debug(patentArchiveFile.getAbsolutePath());
+		LOG.debug("Processing: " + patentArchiveFile.getAbsolutePath());
 		File tempDirectory = new File(outputDirectory.getAbsolutePath() +"/temp/" + patentArchiveFile.getName());
 		FileUtils.forceMkdir(tempDirectory);
 		File archiveOutputDirectory = new File(outputDirectory.getAbsolutePath() +"/" + patentArchiveFile.getName());
 		FileUtils.forceMkdir(archiveOutputDirectory);
 		if (StringUtils.endsWithCaseInsensitive(patentArchiveFile.getName(), "zip")){
-			extractCandidateZipFilesFromZipFile(patentArchiveFile, tempDirectory);
+			extractFilesFromZipFile(patentArchiveFile, tempDirectory);
 		}
 		else if (StringUtils.endsWithCaseInsensitive(patentArchiveFile.getName(), "tar")){
 			extractCandidateZipFilesFromTarFile(patentArchiveFile, tempDirectory);
@@ -98,12 +101,12 @@ public class ExtractOrganicChemistryPatents {
 	 * @param tempDirectory
 	 * @throws IOException
 	 */
-	private void extractCandidateZipFilesFromZipFile(File patentArchiveFile, File tempDirectory) throws IOException {
+	private void extractFilesFromZipFile(File patentArchiveFile, File tempDirectory) throws IOException {
 		ZipFile zipFile = new ZipFile(patentArchiveFile);
 		Enumeration<? extends ZipEntry> entries = zipFile.entries();
 		while(entries.hasMoreElements()) {
 			ZipEntry zipEntry = entries.nextElement();
-			if(StringUtils.endsWithCaseInsensitive(zipEntry.getName(), "zip")){
+			if(StringUtils.endsWithCaseInsensitive(zipEntry.getName(), "xml")){
 				InputStream inputStream =  zipFile.getInputStream(zipEntry);
 				File f = new File(tempDirectory +"/" + FilenameUtils.getName(zipEntry.getName()));
 				FileOutputStream fos = new FileOutputStream(f);
@@ -135,33 +138,55 @@ public class ExtractOrganicChemistryPatents {
 	}
 
 	private void processZipFiles(File inputDirectory, File archiveOutputDirectory) throws ZipException, IOException {
-		Iterator<File> fileIterator = FileUtils.iterateFiles(inputDirectory, new String[]{"ZIP", "zip", "Zip"}, false);
+		Iterator<File> fileIterator = FileUtils.iterateFiles(inputDirectory, new String[]{"xml"}, false);
+		FileUtils.forceMkdir(new File(archiveOutputDirectory + "/temp/"));
 		while (fileIterator.hasNext()) {
 			File f = (File) fileIterator.next();
-			ZipFile zipFile = new ZipFile(f);
-			Enumeration<? extends ZipEntry> entries = zipFile.entries();
-			while(entries.hasMoreElements()) {
-				ZipEntry zipEntry = entries.nextElement();
-				if(StringUtils.endsWithCaseInsensitive(zipEntry.getName(), FilenameUtils.getBaseName(zipFile.getName()) + ".XML")){
-					InputStream inputStream =  zipFile.getInputStream(zipEntry);
-					Document doc;
-					try{
-						doc = Utils.buildXmlFile(inputStream);
+			FileReader fileReader = new FileReader(f);
+			BufferedReader bufferedReader = new BufferedReader(fileReader);
+			int i = 0;
+			String line = bufferedReader.readLine();
+			File currentOutputFile = null;
+			FileWriter currentOutputWriter = null;
+			while (line != null) {
+				if (line.startsWith("<?xml ")) {
+					if (currentOutputFile != null) {
+						currentOutputWriter.close();
+						InputStream inputStream = new FileInputStream(currentOutputFile);
+						Document doc;
+						try {
+							LOG.debug("> Attempting to read document section file " + currentOutputFile.getName());
+							doc = Utils.buildXmlFile(inputStream);
+						} catch (Exception e) {
+							LOG.fatal(f.getAbsolutePath());
+							throw new RuntimeException("Failed to read document", e);
+						}
+						if (isOrganicChemistryDocument(doc)) {
+							FileUtils.copyFile(f, new File(archiveOutputDirectory + "/" + currentOutputFile.getName()));
+						}
 					}
-					catch (Exception e) {
-						LOG.fatal(f.getAbsolutePath());
-						throw new RuntimeException("Failed to read document", e);
-					}
-					if (isOrganicChemistryDocument(doc)){
-						FileUtils.copyFile(f, new File(archiveOutputDirectory +"/" +f.getName()));
-					}
+
+					currentOutputFile = new File(archiveOutputDirectory + "/temp/" + f.getName().split(".xml")[0] + "-" + i + ".xml");
+					LOG.debug("Creating new file for subsection " + currentOutputFile.getName());
+					currentOutputFile.deleteOnExit();
+				  currentOutputWriter = new FileWriter(currentOutputFile);
+					i++;
 				}
+
+				currentOutputWriter.write(line);
+				line = bufferedReader.readLine();
 			}
-			zipFile.close();
+
+			if (currentOutputWriter != null) {
+				currentOutputWriter.close();
+			}
+
+			bufferedReader.close();
 		}
 	}
 
 	private boolean isOrganicChemistryDocument(Document doc) {
+		LOG.debug(">> Classifying document contents");
 		Nodes classifications = doc.query("//classification-ipcr");
 		for (int i = 0; i < classifications.size(); i++) {
 			Element classification = (Element) classifications.get(i);
@@ -169,10 +194,12 @@ public class ExtractOrganicChemistryPatents {
 			if (section != null && section.getValue().equalsIgnoreCase("C")){
 				Element claz = classification.getFirstChildElement("class");
 				if (claz != null && (claz.getValue().equalsIgnoreCase("07") || claz.getValue().equalsIgnoreCase("7"))){
+					LOG.debug("<< Document contains organic chemistry section");
 					return true;
 				}
 			}
 		}
+		LOG.debug("<< Document does not contain organic chemistry section");
 		return false;
 	}
 
@@ -190,8 +217,8 @@ public class ExtractOrganicChemistryPatents {
 	
 	
 	public static void main(String[] args) throws IOException {
-		String inputDirectory  = "C:/Users/dl387/Desktop/newUSPTO/2011";
-		String outputDirectory  = "C:/Users/dl387/Desktop/newUSPTOout/2011";
+		String inputDirectory  = "inputs";
+		String outputDirectory  = "outputs";
 		ExtractOrganicChemistryPatents eocp= new ExtractOrganicChemistryPatents(inputDirectory, outputDirectory);
 		eocp.extractOrganicPatents();
 	}
