@@ -114,6 +114,17 @@
       <groupId>com.github.dan2097</groupId>
       <artifactId>chemicaltagger1.3.1</artifactId>
       <version>154f41c851</version>
+      <exclusions>
+        <exclusion>
+          <groupId>jwnl</groupId>
+          <artifactId>jwnl</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>net.sf.jwordnet</groupId>
+      <artifactId>jwnl</artifactId>
+      <version>1.3.3</version>
     </dependency>
     <dependency>
       <groupId>com.github.dan2097</groupId>
